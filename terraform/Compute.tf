@@ -5,7 +5,7 @@ provider "google" {
 
 resource "google_compute_instance" "web_server" {
   name         = "app-server"
-  machine_type = "n2-highmem-2"
+  machine_type = "e2-highmem-2"
   zone         = "europe-north2-a"
 
   boot_disk {
