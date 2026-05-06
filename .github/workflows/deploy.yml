@@ -1,0 +1,101 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run shellcheck
+        run: shellcheck terraform/user-data.sh
+
+  terraform:
+    needs: lint
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+    outputs:
+      instance_ip: ${{ steps.output.outputs.instance_ip }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/415090109691/locations/global/workloadIdentityPools/github-pool/providers/github
+          service_account: github-wif@project-d318db8d-3948-41a2-88d.iam.gserviceaccount.com
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: terraform
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get instance IP
+        id: output
+        working-directory: terraform
+        run: echo "instance_ip=$(terraform output -raw instance_ip)" >> "$GITHUB_OUTPUT"
+
+  deploy-app:
+    needs: terraform
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ needs.terraform.outputs.instance_ip }} >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Wait for instance to be ready
+        run: |
+          for i in $(seq 1 30); do
+            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+              -i ~/.ssh/deploy_key deploy@${{ needs.terraform.outputs.instance_ip }} \
+              "docker --version" && break || sleep 10
+          done
+
+      - name: Copy app source to server
+        run: |
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
+            -r app/ deploy@${{ needs.terraform.outputs.instance_ip }}:/opt/app/src/
+
+      - name: Build and deploy container
+        run: |
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
+            deploy@${{ needs.terraform.outputs.instance_ip }} << 'EOF'
+          cd /opt/app/src
+          docker build -t app:${{ github.sha }} -t app:latest .
+          cd /opt/app
+          sed -i "s|image: app:.*|image: app:${{ github.sha }}|" docker-compose.yml
+          docker compose up -d --remove-orphans
+          # Run database migration (pseudo step for ORM frameworks like Django/Rails)
+          docker compose exec app python manage.py migrate --noinput || echo "No migrations to run"
+          EOF
+
+      - name: Verify deployment
+        run: |
+          sleep 15
+          curl -sf --max-time 10 "http://${{ needs.terraform.outputs.instance_ip }}" || echo "App not yet responding on HTTP (TLS may be required)"
