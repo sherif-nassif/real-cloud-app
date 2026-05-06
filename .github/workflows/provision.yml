@@ -11,7 +11,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Run shellcheck
         run: shellcheck terraform/user-data.sh
 
@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - id: auth
         uses: google-github-actions/auth@v2

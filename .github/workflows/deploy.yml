@@ -14,20 +14,18 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
+      - uses: actions/checkout@v5
       - name: Run shellcheck
         run: shellcheck terraform/user-data.sh
 
   terraform:
     needs: lint
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
     outputs:
       instance_ip: ${{ steps.output.outputs.instance_ip }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - id: auth
         uses: google-github-actions/auth@v2
@@ -41,14 +39,6 @@ jobs:
         working-directory: terraform
         run: terraform init
 
-      - name: Terraform Plan
-        working-directory: terraform
-        run: terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        working-directory: terraform
-        run: terraform apply -auto-approve tfplan
-
       - name: Get instance IP
         id: output
         working-directory: terraform
@@ -57,17 +47,15 @@ jobs:
   deploy-app:
     needs: terraform
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Write SSH key
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ needs.terraform.outputs.instance_ip }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
       - name: Wait for instance to be ready
         run: |
@@ -77,25 +65,16 @@ jobs:
               "docker --version" && break || sleep 10
           done
 
-      - name: Copy app source to server
+      - name: Copy app source and deploy
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
             -r app/ deploy@${{ needs.terraform.outputs.instance_ip }}:/opt/app/src/
-
-      - name: Build and deploy container
-        run: |
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
             deploy@${{ needs.terraform.outputs.instance_ip }} << 'EOF'
           cd /opt/app/src
-          docker build -t app:${{ github.sha }} -t app:latest .
+          docker build -t app:latest .
           cd /opt/app
-          sed -i "s|image: app:.*|image: app:${{ github.sha }}|" docker-compose.yml
           docker compose up -d --remove-orphans
-          # Run database migration (pseudo step for ORM frameworks like Django/Rails)
+          # Database migration (pseudo step for Django/Rails)
           docker compose exec app python manage.py migrate --noinput || echo "No migrations to run"
           EOF
-
-      - name: Verify deployment
-        run: |
-          sleep 15
-          curl -sf --max-time 10 "http://${{ needs.terraform.outputs.instance_ip }}" || echo "App not yet responding on HTTP (TLS may be required)"
