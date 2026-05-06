@@ -1,28 +1,19 @@
 name: Deploy
 
 on:
-  push:
-    branches:
-      - main
-      - staging
+  workflow_run:
+    workflows: ["Provision Infrastructure"]
+    types:
+      - completed
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  lint:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Run shellcheck
-        run: shellcheck terraform/user-data.sh
-
-  terraform:
-    needs: lint
-    runs-on: ubuntu-latest
-    outputs:
-      instance_ip: ${{ steps.output.outputs.instance_ip }}
 
     steps:
       - uses: actions/checkout@v5
@@ -35,21 +26,12 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v3
 
-      - name: Terraform Init
-        working-directory: terraform
-        run: terraform init
-
       - name: Get instance IP
-        id: output
+        id: ip
         working-directory: terraform
-        run: echo "instance_ip=$(terraform output -raw instance_ip)" >> "$GITHUB_OUTPUT"
-
-  deploy-app:
-    needs: terraform
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
+        run: |
+          terraform init
+          echo "instance_ip=$(terraform output -raw instance_ip)" >> "$GITHUB_OUTPUT"
 
       - name: Write SSH key
         run: |
@@ -61,16 +43,16 @@ jobs:
         run: |
           for i in $(seq 1 30); do
             ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-              -i ~/.ssh/deploy_key deploy@${{ needs.terraform.outputs.instance_ip }} \
+              -i ~/.ssh/deploy_key deploy@${{ steps.ip.outputs.instance_ip }} \
               "docker --version" && break || sleep 10
           done
 
       - name: Copy app source and deploy
         run: |
           scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
-            -r app/ deploy@${{ needs.terraform.outputs.instance_ip }}:/opt/app/src/
+            -r app/ deploy@${{ steps.ip.outputs.instance_ip }}:/opt/app/src/
           ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
-            deploy@${{ needs.terraform.outputs.instance_ip }} << 'EOF'
+            deploy@${{ steps.ip.outputs.instance_ip }} << 'EOF'
           cd /opt/app/src
           docker build -t app:latest .
           cd /opt/app
