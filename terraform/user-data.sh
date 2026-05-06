@@ -299,7 +299,9 @@ chmod 644 /etc/cron.d/db_backup
 # ============================================================
 # 13. Start app stack and nginx
 # ============================================================
-cd /opt/app && docker compose up -d || true
+if cd /opt/app; then
+  docker compose up -d || true
+fi
 sleep 30
 systemctl start nginx
 
