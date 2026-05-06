@@ -5,7 +5,7 @@ provider "google" {
 
 resource "google_compute_instance" "web_server" {
   name         = "app-server"
-  machine_type = "e2-highmem-2"
+  machine_type = "e2-highmem-4"
   zone         = "europe-north2-a"
 
   boot_disk {
@@ -36,5 +36,5 @@ resource "google_compute_instance" "web_server" {
 }
 
 output "instance_ip" {
-  value = google_compute_instance.web_server.network_interface[0].access_config[0].nat_ip
+  value = google_compute_instance.web_server.network_interface[0].network_ip
 }
