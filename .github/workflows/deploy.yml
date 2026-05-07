@@ -54,4 +54,4 @@ jobs:
           gcloud compute ssh app-server \
             --zone=europe-north2-a \
             --tunnel-through-iap \
-            --command="cd /opt/app/src && docker build -t app:latest . && cd /opt/app && docker compose up -d --remove-orphans && docker compose exec app python manage.py migrate --noinput || echo 'No migrations to run'"
+            --command="cd /opt/app/src/app && docker build -t app:latest . && cd /opt/app && docker compose up -d --remove-orphans && docker compose exec app python manage.py migrate --noinput || echo 'No migrations to run'"

@@ -214,7 +214,7 @@ services:
   app:
     image: app:latest
     build:
-      context: ./src
+      context: ./src/app
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
