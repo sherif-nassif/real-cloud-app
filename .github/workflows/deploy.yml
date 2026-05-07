@@ -29,15 +29,21 @@ jobs:
 
       - name: Wait for instance to be ready
         run: |
-          for i in $(seq 1 30); do
+          for i in $(seq 1 60); do
             gcloud compute ssh app-server \
               --zone=europe-north2-a \
               --tunnel-through-iap \
-              --command="docker --version" && break || sleep 10
+              --command="docker --version" 2>/dev/null && break
+            echo "Attempt $i: Docker not ready yet, waiting 30s..."
+            sleep 30
           done
 
       - name: Copy app source to server
         run: |
+          gcloud compute ssh app-server \
+            --zone=europe-north2-a \
+            --tunnel-through-iap \
+            --command="sudo mkdir -p /opt/app/src && sudo chown -R \$(whoami) /opt/app/src"
           gcloud compute scp --recurse \
             --zone=europe-north2-a \
             --tunnel-through-iap \

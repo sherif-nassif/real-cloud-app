@@ -297,12 +297,8 @@ echo "0 * * * * root /usr/local/bin/db_backup.sh >> /var/log/db_backup.log 2>&1"
 chmod 644 /etc/cron.d/db_backup
 
 # ============================================================
-# 13. Start app stack and nginx
+# 13. Start nginx (app will be deployed via CI/CD pipeline)
 # ============================================================
-if cd /opt/app; then
-  docker compose up -d || true
-fi
-sleep 30
 systemctl start nginx
 
-echo "[$(date)] Startup script complete."
+echo "[$(date)] Startup script complete. Waiting for app deployment via CI/CD."
