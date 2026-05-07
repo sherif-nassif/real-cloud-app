@@ -24,39 +24,28 @@ jobs:
           workload_identity_provider: projects/415090109691/locations/global/workloadIdentityPools/github-pool/providers/github
           service_account: github-wif@project-d318db8d-3948-41a2-88d.iam.gserviceaccount.com
 
-      - uses: hashicorp/setup-terraform@v3
-
-      - name: Get instance IP
-        id: ip
-        working-directory: terraform
-        run: |
-          terraform init
-          echo "instance_ip=$(terraform output -raw instance_ip)" >> "$GITHUB_OUTPUT"
-
-      - name: Write SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
 
       - name: Wait for instance to be ready
         run: |
           for i in $(seq 1 30); do
-            ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
-              -i ~/.ssh/deploy_key deploy@${{ steps.ip.outputs.instance_ip }} \
-              "docker --version" && break || sleep 10
+            gcloud compute ssh app-server \
+              --zone=europe-north2-a \
+              --tunnel-through-iap \
+              --command="docker --version" && break || sleep 10
           done
 
-      - name: Copy app source and deploy
+      - name: Copy app source to server
         run: |
-          scp -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
-            -r app/ deploy@${{ steps.ip.outputs.instance_ip }}:/opt/app/src/
-          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
-            deploy@${{ steps.ip.outputs.instance_ip }} << 'EOF'
-          cd /opt/app/src
-          docker build -t app:latest .
-          cd /opt/app
-          docker compose up -d --remove-orphans
-          # Database migration (pseudo step for Django/Rails)
-          docker compose exec app python manage.py migrate --noinput || echo "No migrations to run"
-          EOF
+          gcloud compute scp --recurse \
+            --zone=europe-north2-a \
+            --tunnel-through-iap \
+            app/ app-server:/opt/app/src/
+
+      - name: Build and deploy container
+        run: |
+          gcloud compute ssh app-server \
+            --zone=europe-north2-a \
+            --tunnel-through-iap \
+            --command="cd /opt/app/src && docker build -t app:latest . && cd /opt/app && docker compose up -d --remove-orphans && docker compose exec app python manage.py migrate --noinput || echo 'No migrations to run'"
